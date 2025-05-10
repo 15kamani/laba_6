@@ -1,4 +1,4 @@
-# version: "3.7"
+version: "3.7"
 
 
 services:
@@ -36,6 +36,11 @@ services:
 
   grafana:
     image: grafana/grafana:10.2.3
+    volumes:
+        - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+        - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
+        - rabbitmq-prometheus_prometheus:/prometheus
+        - rabbitmq-prometheus_grafana:/var/lib/grafana
     ports:
       - "3000:3000"
     environment:
@@ -53,10 +58,12 @@ services:
       volumes:
         - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
         - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
+        - rabbitmq-prometheus_prometheus:/prometheus
       ports:
         - "9090:9090"
       networks:
         - monitoring
+      
 
   rabbitmq-exporter:
     image: kbudde/rabbitmq-exporter
@@ -82,8 +89,42 @@ services:
     networks:
       - monitoring
 
+
+  node-exporter:
+      command:
+        - "--path.procfs=/host/proc"
+        - "--path.rootfs=/rootfs"
+        - "--path.sysfs=/host/sys"
+        - "--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)"
+      expose:
+        - 9100
+      # https://hub.docker.com/r/prom/node-exporter/tags
+      image: prom/node-exporter:v1.9.1
+      networks:
+        - monitoring
+      volumes:
+        - /proc:/host/proc:ro
+        - /sys:/host/sys:ro
+        - /:/rootfs:ro
+  cadvisor:
+    expose:
+    - 8080
+    # https://hub.docker.com/r/google/cadvisor/tags
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    networks:
+      - monitoring
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+        #- /cgroup:/cgroup:ro #doesn't work on MacOS only for Linux
+  
+
 networks:
   monitoring:
     driver: bridge
 
-
+volumes:
+  rabbitmq-prometheus_prometheus:
+  rabbitmq-prometheus_grafana:

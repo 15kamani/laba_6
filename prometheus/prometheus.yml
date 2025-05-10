@@ -16,12 +16,22 @@ scrape_configs:
     static_configs:
         - targets: ['rabbitmq-exporter:9419']
 
-  alerting:
-  alertmanagers:
+
+    alerting:
+    alertmanagers:
     - static_configs:
         - targets:
             - alertmanager:9093
 
 
-  rule_files:
+    rule_files:
     - "alert.rules.yml"
+
+    - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
