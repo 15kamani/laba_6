@@ -1,4 +1,4 @@
-version: "3.7"
+# version: "3.7"
 
 
 services:
@@ -17,11 +17,53 @@ services:
     networks:
       - monitoring
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.49
+  # jaeger:
+  #   image: jaegertracing/all-in-one:1.49
+  #   ports:
+  #     - "16686:16686" # Веб-интерфейс Jaeger
+  #     - "6831:6831/udp" # Для агентов
+
+  tempo:
+    image: grafana/tempo:2.2.2
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml
     ports:
-      - "16686:16686" # Веб-интерфейс Jaeger
-      - "6831:6831/udp" # Для агентов
+      - "3200:3200" # Tempo API
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - tempo
+    networks:
+      - monitoring
+
+
+  prometheus:
+      image: prom/prometheus:v2.48.0
+      volumes:
+        - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      ports:
+        - "9090:9090"
+
+  rabbitmq-exporter:
+    image: kbudde/rabbitmq-exporter
+    environment:
+      RABBIT_USER: admin
+      RABBIT_PASSWORD: admin
+      RABBIT_URL: http://rabbitmq:15672
+    ports:
+      - "9419:9419"
+    depends_on:
+      - rabbitmq
 
 networks:
   monitoring:

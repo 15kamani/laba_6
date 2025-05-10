@@ -9,14 +9,31 @@ import json
 # OpenTelemetry
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
+import time
+# Prometheus
+from prometheus_client import start_http_server, Counter, Histogram
+
+
+from opentelemetry.trace import format_trace_id
+
 app = FastAPI()
 FastAPIInstrumentor.instrument_app(app)
+Instrumentator().instrument(app).expose(app)
 
 RABBITMQ_URL = "amqp://admin:admin@localhost:5672"
+
+# Прометей-метрики
+MESSAGES_PROCESSED = Counter("messages_processed_total", "Total number of messages processed")
+MESSAGES_ERRORS = Counter("messages_processing_errors_total", "Total number of processing errors")
+MESSAGE_PROCESSING_TIME = Histogram("message_processing_duration_seconds", "Time spent processing message")
+
+
 # Настроим провайдер трейсинга
 trace.set_tracer_provider(TracerProvider())
 from opentelemetry.sdk.resources import Resource
@@ -24,12 +41,11 @@ resource = Resource(attributes={"service.name": "Gateway-trace-app"})
 trace.set_tracer_provider(TracerProvider(resource=resource))
 
 
-# Экспорт в Jaeger
-jaeger_exporter = JaegerExporter(
-    agent_host_name="localhost",
-    agent_port=6831,
-)
-span_processor = BatchSpanProcessor(jaeger_exporter)
+# Настройка
+otlp_exporter = OTLPSpanExporter(endpoint="localhost:4317", insecure=True)
+
+
+span_processor = BatchSpanProcessor(otlp_exporter)
 trace.get_tracer_provider().add_span_processor(span_processor)
 
 # Настройка логирования
@@ -58,6 +74,7 @@ async def startup():
         app.state.callback_queue = await app.state.channel.declare_queue(exclusive=True)
         async def on_response(message: aio_pika.IncomingMessage):
             correlation_id = message.correlation_id
+            
             if correlation_id in app.state.futures:
                 app.state.futures[correlation_id].set_result(message.body)
       
@@ -83,8 +100,10 @@ async def shutdown():
 @app.post("/send/")
 async def send_message(request: MessageRequest):
     message = request.message
-    correlation_id = str(uuid.uuid4())
-    trace_id = str(uuid.uuid4())  # Создаём trace_id для запроса
+    correlation_id = str(uuid.uuid4()),
+    span = trace.get_current_span()
+    trace_id = format_trace_id(span.get_span_context().trace_id)
+    logger.info(f"[TRACE_ID] {trace_id}") 
     payload = {
             "trace_id": trace_id,
             "message": message
@@ -97,21 +116,22 @@ async def send_message(request: MessageRequest):
 
 
     try:
-        with tracer.start_as_current_span("gateway_send_message") as span:
-                span.set_attribute("custom.trace_id", trace_id)
-                with tracer.start_as_current_span("gateway_send_message") as span:
-                        span.set_attribute("custom.trace_id", trace_id)
-                        await app.state.exchange.publish(
-                            aio_pika.Message(
-                                body=json.dumps(payload).encode(),
-                                reply_to=app.state.callback_queue.name,
-                                correlation_id=correlation_id
-                            ),
-                            routing_key="service_queue"
-                        )
+        with tracer.start_as_current_span("gateway_send_message") as send_span:
+            send_span.set_attribute("custom.trace_id", trace_id)
+            span.set_attribute("custom.trace_id", trace_id)
+            await app.state.exchange.publish(
+                aio_pika.Message(
+                    body=json.dumps(payload).encode(),
+                    reply_to=app.state.callback_queue.name,
+                    correlation_id=correlation_id,
+                    span = trace.get_current_span()
+                    ),
+                routing_key="service_queue"
+            )
 
 
-        response = await future
+        with tracer.start_as_current_span("gateway_wait_response"):
+            response = await future
         decoded_response = json.loads(response)
             # Логируем trace_id вместе с ответом
             # print(f"[Gateway][Trace ID: {trace_id}] Response: {decoded_response}")
