@@ -48,11 +48,15 @@ services:
 
 
   prometheus:
+      container_name: prometheus
       image: prom/prometheus:v2.48.0
       volumes:
         - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+        - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
       ports:
         - "9090:9090"
+      networks:
+        - monitoring
 
   rabbitmq-exporter:
     image: kbudde/rabbitmq-exporter
@@ -65,6 +69,21 @@ services:
     depends_on:
       - rabbitmq
 
+  alertmanager:
+    image: prom/alertmanager
+    hostname: alertmanager
+    container_name: alertmanager
+
+
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    networks:
+      - monitoring
+
 networks:
   monitoring:
     driver: bridge
+
+
