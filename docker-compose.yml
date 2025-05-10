@@ -1,0 +1,28 @@
+version: "3.7"
+
+
+services:
+  rabbitmq:
+    hostname: rabbitmq
+    container_name: rabbitmq
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672" # AMQP
+      - "15672:15672" # Web UI
+      - "15692:15692" # <== Порт для Prometheus метрик
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbitmq_prometheus true"
+    networks:
+      - monitoring
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.49
+    ports:
+      - "16686:16686" # Веб-интерфейс Jaeger
+      - "6831:6831/udp" # Для агентов
+
+networks:
+  monitoring:
+    driver: bridge
